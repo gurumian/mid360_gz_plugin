@@ -1,10 +1,10 @@
 #include "mid360_gz_plugin/mid360_plugin.hpp"
 
 #include <gz/plugin/Register.hh>
+#include <gz/sim/Model.hh>
 #include <gz/sim/components/ParentEntity.hh>
 #include <gz/sim/components/Pose.hh>
 #include <gz/sim/components/RaycastData.hh>
-#include <gz/sim/components/WorldPose.hh>
 #include <gz/common/Console.hh>
 #include <gz/math/Quaternion.hh>
 #include <gz/math/Vector3.hh>
@@ -54,6 +54,10 @@ void Mid360Plugin::Configure(
   }
   ros_node_ = std::make_shared<rclcpp::Node>("mid360_gz_plugin_node");
 
+  std::string link_name{"lidar_link"};
+  if (sdf->HasElement("link_name")) {
+    link_name = sdf->Get<std::string>("link_name");
+  }
   if (sdf->HasElement("frame_id")) {
     frame_id_ = sdf->Get<std::string>("frame_id");
   }
@@ -94,10 +98,14 @@ void Mid360Plugin::Configure(
 
   cloud_pub_ = ros_node_->create_publisher<sensor_msgs::msg::PointCloud2>(ros_topic_, 10);
 
-  sensor_entity_ = entity;
-  if (ecm.HasComponent<gz::sim::components::ParentEntity>(entity)) {
-    parent_link_entity_ = ecm.Component<gz::sim::components::ParentEntity>(entity)->Data();
+  // Plugin is attached to the model; get the link entity by name (gz-sim does not load plugins inside <link>).
+  gz::sim::Model model(entity);
+  sensor_entity_ = model.LinkByName(ecm, link_name);
+  if (sensor_entity_ == gz::sim::kNullEntity) {
+    gzerr << "[Mid360Plugin] Link '" << link_name << "' not found in model." << std::endl;
+    return;
   }
+  parent_link_entity_ = entity;  // model entity
 
   num_rays_ = static_cast<size_t>(samples_ / downsample_);
   if (num_rays_ == 0) {
@@ -143,8 +151,7 @@ void Mid360Plugin::PreUpdate(
     const auto & dir = scan_directions_[idx];
     double az = dir.first;
     double ze = dir.second;
-    gz::math::Quaterniond ray_rot;
-    ray_rot.Euler(0.0, ze, az);
+    gz::math::Quaterniond ray_rot(0.0, ze, az);  // roll, pitch, yaw (rad)
     gz::math::Vector3d axis = ray_rot * gz::math::Vector3d(1.0, 0.0, 0.0);
 
     data.rays[i].start = axis * min_range_;
@@ -221,8 +228,7 @@ void Mid360Plugin::PostUpdate(
       const auto & dir = scan_directions_[idx];
       double az = dir.first;
       double ze = dir.second;
-      gz::math::Quaterniond ray_rot;
-      ray_rot.Euler(0.0, ze, az);
+      gz::math::Quaterniond ray_rot(0.0, ze, az);  // roll, pitch, yaw (rad)
       gz::math::Vector3d axis = ray_rot * gz::math::Vector3d(1.0, 0.0, 0.0);
       point_link = axis * max_range_;
     }

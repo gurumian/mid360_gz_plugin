@@ -24,29 +24,25 @@ source install/setup.bash
 Add the plugin library to Gazebo’s search path:
 
 ```bash
-export GZ_SIM_SYSTEM_PLUGIN_PATH=$GZ_SIM_SYSTEM_PLUGIN_PATH:$(ros2 pkg prefix mid360_gz_plugin)/lib/mid360_gz_plugin
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$GZ_SIM_SYSTEM_PLUGIN_PATH:$(ros2 pkg prefix mid360_gz_plugin)/lib
 ```
 
 ## SDF usage
 
-Attach the plugin to a **link** that represents the Mid360 sensor (e.g. `lidar_link`). The CSV path can be absolute or relative; for the installed config use the package share path.
+Attach the plugin to the **model** (not inside `<link>`; gz-sim does not load plugins from link elements). Use `<link_name>` to specify which link is the sensor. The CSV path can be absolute or relative; for the installed config use the package share path.
 
 Example (inside a `<model>`):
 
 ```xml
-<link name="lidar_link">
-  <pose>0 0 0.1 0 0 0</pose>
-  <inertial>
-    <mass>0.1</mass>
-    <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
-  </inertial>
-  <visual name="mid360_visual">
-    <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
-  </visual>
-  <collision name="mid360_collision">
-    <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
-  </collision>
+<model name="my_robot">
+  <link name="lidar_link">
+    <pose>0 0 0.1 0 0 0</pose>
+    <inertial><mass>0.1</mass> ... </inertial>
+    <visual>...</visual>
+    <collision>...</collision>
+  </link>
   <plugin filename="mid360_gz_plugin" name="mid360_gz_plugin::Mid360Plugin">
+    <link_name>lidar_link</link_name>
     <frame_id>lidar_link</frame_id>
     <ros_topic>points</ros_topic>
     <csv_file>PATH_TO_MID360_CSV</csv_file>
@@ -55,12 +51,7 @@ Example (inside a `<model>`):
     <samples>24000</samples>
     <downsample>1</downsample>
   </plugin>
-</link>
-
-<joint name="lidar_joint" type="fixed">
-  <parent>base_link</parent>
-  <child>lidar_link</child>
-</joint>
+</model>
 ```
 
 **CSV path:** After install, the default scan pattern is at  
@@ -71,6 +62,7 @@ Use that path (or pass an absolute path) in `<csv_file>`.
 
 | Parameter    | Type   | Default      | Description                          |
 |-------------|--------|--------------|--------------------------------------|
+| `link_name` | string | `lidar_link`| Name of the link that holds the sensor (required when plugin is on model). |
 | `frame_id`  | string | `livox_mid360` | Frame ID for the PointCloud2 header. |
 | `ros_topic` | string | `points`    | ROS 2 topic for PointCloud2.        |
 | `csv_file`  | string | (required)  | Path to Mid360 scan pattern CSV.     |
@@ -78,6 +70,37 @@ Use that path (or pass an absolute path) in `<csv_file>`.
 | `max_range` | double | 200.0       | Maximum range (m).                  |
 | `samples`   | int    | 24000       | Number of rays per update.          |
 | `downsample`| int    | 1           | Downsample factor (≥1).             |
+
+**CPU:** Effective rays per frame = `samples` / `downsample`. Lower this (e.g. 2000/4 = 500) to reduce CPU load; increase for denser point clouds.
+
+## Try it (test world)
+
+Build, then run the test world (from your colcon workspace root, e.g. `ros2/`):
+
+```bash
+cd /path/to/workspace   # e.g. ros2
+colcon build --packages-select mid360_gz_plugin
+source install/setup.bash
+./src/mid360_gz_plugin/scripts/run_mid360_test.sh
+```
+
+Or with an explicit workspace path: `./src/mid360_gz_plugin/scripts/run_mid360_test.sh /path/to/workspace`.
+
+This starts Gazebo Sim with a static model that has the Mid360 plugin; PointCloud2 is published on `/points`.
+
+### ROS_DOMAIN_ID and RViz
+
+**ROS_DOMAIN_ID** (0–101) is the DDS “network” id: only nodes with the same value discover each other. This repo’s Makefile uses `ROS_DOMAIN_ID=32`. The run script sets it to 32 by default so that RViz and the sim see the same topics.
+
+To view the point cloud in RViz2, use the **same** domain in the terminal where you start RViz:
+
+```bash
+export ROS_DOMAIN_ID=32
+source /path/to/install_sim/setup.bash   # or your workspace’s setup
+rviz2
+```
+
+In RViz2: **Add** → **By topic** → **/points** → **PointCloud2**; set **Fixed Frame** to `lidar_link`. You should see the LiDAR points.
 
 ## Current behavior
 
